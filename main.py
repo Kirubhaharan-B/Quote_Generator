@@ -4,9 +4,7 @@ import textwrap, random, os, datetime
 import urllib3
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import pickle
+from google.oauth2 import service_account  # ✅ NEW
 
 urllib3.disable_warnings()
 
@@ -54,19 +52,15 @@ def fetch_pexels_image(query, save_path="/tmp/background.jpg"):
     return save_path
 
 def get_average_brightness(image, box=None):
-    # Calculate average brightness in the given box or whole image
     if box:
         crop = image.crop(box)
     else:
         crop = image
-    greyscale = crop.convert("L")  # convert to greyscale
+    greyscale = crop.convert("L")
     histogram = greyscale.histogram()
     pixels = sum(histogram)
-    brightness = scale = 0
-    for i in range(256):
-        brightness += histogram[i] * i
-    avg = brightness / pixels if pixels else 0
-    return avg
+    brightness = sum(i * val for i, val in enumerate(histogram))
+    return brightness / pixels if pixels else 0
 
 def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
     font_path = "assets/Montserrat-Bold.ttf"
@@ -83,7 +77,6 @@ def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
         quote_text = quote.strip()
         author = ""
 
-    # Fit text function for font size and wrapping
     def fit_text(quote_text, max_width, max_height, initial_size=64, min_size=20, line_spacing=10):
         font_size = initial_size
         while font_size >= min_size:
@@ -111,17 +104,13 @@ def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
     font_quote, lines = fit_text(quote_text.strip('" \n'), width, height)
     font_author = ImageFont.truetype(font_path, max(20, font_quote.size // 2))
 
-    # Calculate brightness under text area to decide text color
     text_area_height = len(lines) * (font_quote.size + 10) + (font_author.size if author else 0)
     y_text_start = (height - text_area_height) // 2
-    # We sample a box in the center for brightness
     sample_box = (0, y_text_start, width, y_text_start + text_area_height)
     brightness = get_average_brightness(blurred, sample_box)
 
-    # Use black or white font color based on brightness
     font_color = "white" if brightness < 130 else "black"
 
-    # Vertical centering and drawing
     line_height = font_quote.size + 10
     y = y_text_start
     for line in lines:
@@ -138,24 +127,12 @@ def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
     return output_path
 
 def upload_to_drive(file_path, author, folder_name='Quotes'):
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
-
+    creds = service_account.Credentials.from_service_account_file(
+        '/etc/secrets/service-account.json',
+        scopes=SCOPES
+    )
     service = build('drive', 'v3', credentials=creds)
 
-    # Check if folder exists
     folder_id = None
     results = service.files().list(
         q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
@@ -171,7 +148,6 @@ def upload_to_drive(file_path, author, folder_name='Quotes'):
         file = service.files().create(body=file_metadata, fields='id').execute()
         folder_id = file.get('id')
 
-    # Format file name
     today = datetime.date.today().isoformat()
     author_tag = author.lower().replace(" ", "-").replace(".", "").strip()
     filename = f"{today}-{author_tag}-quote.png"
@@ -181,7 +157,7 @@ def upload_to_drive(file_path, author, folder_name='Quotes'):
         'parents': [folder_id]
     }
     media = MediaFileUpload(file_path, mimetype='image/png')
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
     print(f"✅ Uploaded to Google Drive as {filename}")
 
