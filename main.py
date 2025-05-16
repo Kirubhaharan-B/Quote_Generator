@@ -1,16 +1,22 @@
+import os
+import random
 import requests
+import textwrap
+import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import textwrap, random, os, datetime
-import urllib3
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account  # ✅ NEW
+import urllib3
 
 urllib3.disable_warnings()
 
-PEXELS_API_KEY = "VZS0oPqUPO04YfW0dy3qmqMvak10sZncJA6MkqjUEldShxYgn9izLA5D"
-PEXELS_URL = "https://api.pexels.com/v1/search"
+PEXELS_API_K = os.environ.get("PEXELS_API_KEY")
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
+GOOGLE_CREDENTIALS_PATH = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
+PEXELS_URL = "https://api.pexels.com/v1/search"
 
 def fetch_quote():
     res = requests.get('https://dummyjson.com/quotes/random')
@@ -59,10 +65,11 @@ def get_average_brightness(image, box=None):
     greyscale = crop.convert("L")
     histogram = greyscale.histogram()
     pixels = sum(histogram)
-    brightness = sum(i * val for i, val in enumerate(histogram))
-    return brightness / pixels if pixels else 0
+    brightness = sum(i * histogram[i] for i in range(256))
+    avg = brightness / pixels if pixels else 0
+    return avg
 
-def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
+def overlay_quote(image_path, quote, output_path="/tmp/quote_output.png"):
     font_path = "assets/Montserrat-Bold.ttf"
     image = Image.open(image_path).convert("RGBA")
     image = image.resize((1080, 1350), Image.Resampling.LANCZOS)
@@ -108,45 +115,26 @@ def overlay_quote(image_path, quote, output_path="output/quote_output.png"):
     y_text_start = (height - text_area_height) // 2
     sample_box = (0, y_text_start, width, y_text_start + text_area_height)
     brightness = get_average_brightness(blurred, sample_box)
-
     font_color = "white" if brightness < 130 else "black"
 
-    line_height = font_quote.size + 10
     y = y_text_start
     for line in lines:
         w = draw.textbbox((0, 0), line, font=font_quote)[2]
         draw.text(((width - w) / 2, y), line, font=font_quote, fill=font_color)
-        y += line_height
+        y += font_quote.size + 10
 
     if author:
         w = draw.textbbox((0, 0), author, font=font_author)[2]
         draw.text(((width - w) / 2, y + 30), author, font=font_author, fill=font_color)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     blurred.save(output_path)
     return output_path
 
-def upload_to_drive(file_path, author, folder_name='Quotes'):
-    creds = service_account.Credentials.from_service_account_file(
-        '/etc/secrets/service-account.json',
-        scopes=SCOPES
+def upload_to_drive(file_path, author):
+    credentials = service_account.Credentials.from_service_account_file(
+        GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
     )
-    service = build('drive', 'v3', credentials=creds)
-
-    folder_id = None
-    results = service.files().list(
-        q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
-        spaces='drive', fields="files(id, name)").execute()
-    folders = results.get('files', [])
-    if folders:
-        folder_id = folders[0]['id']
-    else:
-        file_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder'
-        }
-        file = service.files().create(body=file_metadata, fields='id').execute()
-        folder_id = file.get('id')
+    service = build('drive', 'v3', credentials=credentials)
 
     today = datetime.date.today().isoformat()
     author_tag = author.lower().replace(" ", "-").replace(".", "").strip()
@@ -154,11 +142,10 @@ def upload_to_drive(file_path, author, folder_name='Quotes'):
 
     file_metadata = {
         'name': filename,
-        'parents': [folder_id]
+        'parents': [GOOGLE_DRIVE_FOLDER_ID]
     }
     media = MediaFileUpload(file_path, mimetype='image/png')
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-
     print(f"✅ Uploaded to Google Drive as {filename}")
 
 def generate_and_save_quote_image():
