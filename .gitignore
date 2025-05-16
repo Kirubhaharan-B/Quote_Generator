@@ -172,3 +172,15 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Ignore .env file containing sensitive data
+.env
+
+# Ignore the credentials.json file containing Google API keys
+assets/credentials.json
+
+# Ignore other files you don't want in Git (e.g., Python bytecode)
+*.pyc
+__pycache__
+venv/
+
