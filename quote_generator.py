@@ -27,7 +27,7 @@ def generate_image_description(text):
     for key, desc in keywords.items():
         if key in text.lower():
             return desc
-    return "minimal abstract background"
+    return "black abstract"
 
 def fetch_pexels_image(query, save_path="/tmp/bg.jpg"):
     headers = {"Authorization": PEXELS_API_KEY}
@@ -48,38 +48,65 @@ def get_avg_brightness(img, box=None):
     brightness = sum(i * v for i, v in enumerate(histogram)) / pixels if pixels else 0
     return brightness
 
-def overlay_quote(img_path, quote, out_path="output.png"):
-    img = Image.open(img_path).convert("RGBA").resize((1080, 1350))
-    blurred = img.filter(ImageFilter.GaussianBlur(radius=5))
+def overlay_quote(image_path, quote, output_path="output.png"):
+    font_path = "assets/Montserrat-Bold.ttf"
+    image = Image.open(image_path).convert("RGBA")
+    image = image.resize((1080, 1350), Image.Resampling.LANCZOS)
+    blurred = image.filter(ImageFilter.GaussianBlur(radius=5))
     draw = ImageDraw.Draw(blurred)
     width, height = blurred.size
 
-    quote_text, author = quote.rsplit("—", 1)
-    author = f"— {author.strip()}"
-    quote_text = quote_text.strip('" \n')
+    if "—" in quote:
+        quote_text, author = quote.rsplit("—", 1)
+        author = f"— {author.strip()}"
+    else:
+        quote_text = quote.strip()
+        author = ""
 
-    font_size = 64
-    while font_size > 20:
-        font = ImageFont.truetype(FONT_PATH, font_size)
-        lines = textwrap.wrap(quote_text, width=38)
-        total_height = len(lines) * (font_size + 10)
-        if total_height < height * 0.6:
-            break
-        font_size -= 4
+    def fit_text(quote_text, max_width, max_height, initial_size=64, min_size=20, line_spacing=10):
+        font_size = initial_size
+        while font_size >= min_size:
+            font = ImageFont.truetype(font_path, font_size)
+            wrapped = textwrap.wrap(quote_text, width=38)
+            refined = []
+            for line in wrapped:
+                temp_line = ""
+                for word in line.split():
+                    test_line = f"{temp_line} {word}".strip()
+                    w = draw.textbbox((0, 0), test_line, font=font)[2]
+                    if w > max_width * 0.9:
+                        refined.append(temp_line)
+                        temp_line = word
+                    else:
+                        temp_line = test_line
+                if temp_line:
+                    refined.append(temp_line)
 
-    y = (height - total_height) // 2
-    font_color = "white" if get_avg_brightness(blurred) < 130 else "black"
+            total_height = len(refined) * (font_size + line_spacing)
+            if total_height <= max_height * 0.6:
+                return font, refined
+            font_size -= 4
+        return ImageFont.truetype(font_path, min_size), textwrap.wrap(quote_text, width=38)
+
+    font_quote, lines = fit_text(quote_text.strip('" \n'), width, height)
+    font_author = ImageFont.truetype(font_path, max(20, font_quote.size // 2))
+
+    line_height = font_quote.size + 10
+    total_text_height = len(lines) * line_height + (font_author.size if author else 0)
+    y = (height - total_text_height) // 2
+
     for line in lines:
-        w = draw.textbbox((0, 0), line, font=font)[2]
-        draw.text(((width - w) / 2, y), line, font=font, fill=font_color)
-        y += font_size + 10
+        w = draw.textbbox((0, 0), line, font=font_quote)[2]
+        draw.text(((width - w) / 2, y), line, font=font_quote, fill="white")
+        y += line_height
 
-    author_font = ImageFont.truetype(FONT_PATH, font_size // 2)
-    w = draw.textbbox((0, 0), author, font=author_font)[2]
-    draw.text(((width - w) / 2, y + 20), author, font=author_font, fill=font_color)
+    if author:
+        w = draw.textbbox((0, 0), author, font=font_author)[2]
+        draw.text(((width - w) / 2, y + 30), author, font=font_author, fill="white")
 
-    blurred.save(out_path)
-    return out_path
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    blurred.save(output_path)
+    return output_path
 
 def upload_to_drive(file_path, author):
     creds = service_account.Credentials.from_service_account_file(
