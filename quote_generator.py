@@ -83,7 +83,7 @@ def overlay_quote(img_path, quote, out_path="output.png"):
 
 def upload_to_drive(file_path, author):
     creds = service_account.Credentials.from_service_account_file(
-        os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+         '/etc/secrets/service-account.json',
         scopes=["https://www.googleapis.com/auth/drive.file"]
     )
     service = build('drive', 'v3', credentials=creds)
