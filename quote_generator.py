@@ -1,4 +1,4 @@
-import os, requests, textwrap, random, datetime, pickle
+import os, requests, textwrap, random, datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -40,16 +40,8 @@ def fetch_pexels_image(query, save_path="/tmp/bg.jpg"):
         f.write(img_data)
     return save_path
 
-def get_avg_brightness(img, box=None):
-    crop = img.crop(box) if box else img
-    greyscale = crop.convert("L")
-    histogram = greyscale.histogram()
-    pixels = sum(histogram)
-    brightness = sum(i * v for i, v in enumerate(histogram)) / pixels if pixels else 0
-    return brightness
-
-def overlay_quote(image_path, quote, output_path="output.png"):
-    font_path = "assets/Montserrat-Bold.ttf"
+def overlay_quote(image_path, quote, output_path="output/quote.png"):
+    font_path = FONT_PATH
     image = Image.open(image_path).convert("RGBA")
     image = image.resize((1080, 1350), Image.Resampling.LANCZOS)
     blurred = image.filter(ImageFilter.GaussianBlur(radius=5))
@@ -104,13 +96,16 @@ def overlay_quote(image_path, quote, output_path="output.png"):
         w = draw.textbbox((0, 0), author, font=font_author)[2]
         draw.text(((width - w) / 2, y + 30), author, font=font_author, fill="white")
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    dir_name = os.path.dirname(output_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+
     blurred.save(output_path)
     return output_path
 
 def upload_to_drive(file_path, author):
     creds = service_account.Credentials.from_service_account_file(
-         '/etc/secrets/service-account.json',
+        '/etc/secrets/service-account.json',
         scopes=["https://www.googleapis.com/auth/drive.file"]
     )
     service = build('drive', 'v3', credentials=creds)
